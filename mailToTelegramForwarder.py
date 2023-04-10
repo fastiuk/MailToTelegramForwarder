@@ -736,11 +736,16 @@ class Mail:
         """
         get UID of most recent mail
         """
-        rv, data = self.mailbox.uid('search', '', 'UID *')
+        rv, data = self.mailbox.select(self.config.imap_folder)
+        rv, data = self.mailbox.uid('SEARCH', None, 'UNSEEN')
         if rv != 'OK':
             logging.info("No messages found!")
             return ''
-        return self.config.tool.binary_to_string(data[0])
+        try:
+            num = Tool.binary_to_string(data[0].split()[0])
+        except:
+            num = 1 
+        return num
 
     def parse_mail(self, uid, mail) -> (MailData, None):
         """
@@ -902,7 +907,8 @@ class Mail:
             return
 
         try:
-            rv, data = self.mailbox.uid('search', '', search_string)
+            rv, data = self.mailbox.select(self.config.imap_folder)
+            rv, data = self.mailbox.uid('search', None, search_string)
             if rv != 'OK':
                 logging.info("No messages found!")
                 return
@@ -940,6 +946,7 @@ class Mail:
             current_uid = self.config.tool.binary_to_string(cur_uid)
 
             try:
+                rv, data = self.mailbox.select(self.config.imap_folder)
                 rv, data = self.mailbox.uid('fetch', cur_uid, '(RFC822)')
                 if rv != 'OK':
                     logging.error("ERROR getting message: %s" % current_uid)

@@ -140,6 +140,7 @@ class Config:
     imap_read_old_mails = False
     imap_read_old_mails_processed = False
     imap_ignore_inline_image = ''
+    imap_cut_from_subject = ""
 
     tg_bot_token = None
     tg_forward_to_chat_id = None
@@ -178,6 +179,8 @@ class Config:
             self.imap_max_length = self.get_config('Mail', 'max_length', self.imap_max_length, int)
             self.imap_ignore_inline_image = self.get_config('Mail', 'ignore_inline_image',
                                                             self.imap_ignore_inline_image)
+            self.imap_cut_from_subject = self.get_config(
+                'Mail', 'cut_from_subject', self.imap_cut_from_subject)
 
             self.tg_bot_token = self.get_config('Telegram', 'bot_token', self.tg_bot_token)
             tool.mask_error_data.append(self.tg_bot_token)
@@ -464,7 +467,9 @@ class TelegramBot:
                     if mail.type == MailDataType.HTML:
                         parser = telegram.ParseMode.HTML
 
-                    if self.config.tg_forward_mail_content or not self.config.tg_forward_attachment:
+                    if (self.config.tg_forward_mail_content or
+                        not self.config.tg_forward_attachment or
+                        self.config.tg_forward_embedded_images):
                         # send mail content (summary)
                         message = mail.summary
 
@@ -475,7 +480,13 @@ class TelegramBot:
                             title = '%s' % image.get_title()
 
                             if self.config.tg_forward_embedded_images:
-                                title = '%i. %s: %s' % (image_no, mail.mail_subject, image.get_title())
+                                if self.config.tg_forward_mail_content:
+                                    title = '%i. %s: %s' % (image_no, mail.mail_subject, image.get_title())
+                                else:
+                                    title = '%s' % (mail.mail_subject)
+                                print(self.config.tg_forward_to_chat_id)
+                                print(parser)
+                                print(title)
                                 doc_message: telegram.Message = bot.send_photo(
                                     chat_id=self.config.tg_forward_to_chat_id,
                                     parse_mode=parser,
@@ -491,36 +502,40 @@ class TelegramBot:
                             )
                             image_no += 1
 
-                        # write image links
-                        for img_link in re.finditer(r'(\${img-link:(?P<src>[^|]*)\|(?P<alt>[^}]*)})', message,
-                                                    flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE)):
-                            src = img_link.group('src')
-                            alt = img_link.group('alt')
-                            message = message.replace(
-                                img_link.groups()[0],
-                                '<a href="%s">🖼 %s</a>' % (src, alt)
-                            )
+                        if self.config.tg_forward_mail_content:
+                            # write image links
+                            for img_link in re.finditer(r'(\${img-link:(?P<src>[^|]*)\|(?P<alt>[^}]*)})', message,
+                                                        flags=(re.DOTALL | re.MULTILINE | re.IGNORECASE)):
+                                src = img_link.group('src')
+                                alt = img_link.group('alt')
+                                message = message.replace(
+                                    img_link.groups()[0],
+                                    '<a href="%s">🖼 %s</a>' % (src, alt)
+                                )
 
-                        tg_message = bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
-                                                      parse_mode=parser,
-                                                      text=message,
-                                                      disable_web_page_preview=False)
+                            tg_message = bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
+                                                        parse_mode=parser,
+                                                        text=message,
+                                                        disable_web_page_preview=False)
 
-                        logging.info("Mail summary for '%s' (UID: '%s') was sent"
-                                     " with message ID '%i' to '%s' (ID: '%i')"
-                                     % (mail.mail_subject, mail.uid, tg_message.message_id,
-                                        tg_chat_title, self.config.tg_forward_to_chat_id))
+                            logging.info("Mail summary for '%s' (UID: '%s') was sent"
+                                        " with message ID '%i' to '%s' (ID: '%i')"
+                                        % (mail.mail_subject, mail.uid, tg_message.message_id,
+                                            tg_chat_title, self.config.tg_forward_to_chat_id))
 
                     if self.config.tg_forward_attachment and len(mail.attachments) > 0:
                         for attachment in mail.attachments:
                             subject = mail.mail_subject
-                            if mail.type == MailDataType.HTML:
-                                file_name = attachment.name
-                                caption = '<b>' + subject + '</b>:\n' + file_name
+                            if self.config.tg_forward_mail_content:
+                                if mail.type == MailDataType.HTML:
+                                    file_name = attachment.name
+                                    caption = '<b>' + subject + '</b>:\n' + file_name
+                                else:
+                                    file_name = telegram.utils.helpers.escape_markdown(
+                                        text=attachment.name, version=self.config.tg_markdown_version)
+                                    caption = '*' + subject + '*:\n' + file_name
                             else:
-                                file_name = telegram.utils.helpers.escape_markdown(
-                                    text=attachment.name, version=self.config.tg_markdown_version)
-                                caption = '*' + subject + '*:\n' + file_name
+                                caption = subject
 
                             tg_message = bot.send_document(chat_id=self.config.tg_forward_to_chat_id,
                                                            parse_mode=parser,
@@ -865,6 +880,8 @@ class Mail:
                                                                       version=self.config.tg_markdown_version)
                 email_text = "*From:* " + mail_from + "\n*Subject:* "
             email_text += subject + summary_line + content + " " + attachments_summary
+
+            subject = subject.replace(self.config.imap_cut_from_subject, '')
 
             mail_data = MailData()
             mail_data.uid = uid

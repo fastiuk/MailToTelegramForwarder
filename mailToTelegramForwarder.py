@@ -201,7 +201,7 @@ class Config:
         """
         try:
             self.tool = tool
-            self.config_parser = configparser.ConfigParser()
+            self.config_parser = configparser.ConfigParser(interpolation=None)
             files = self.config_parser.read(cmd_args.config)
             if len(files) == 0:
                 logging.critical("Error parsing config file: File '%s' not found!" % cmd_args.config)
@@ -217,7 +217,7 @@ class Config:
             self.imap_push_mode = self.get_config('Mail', 'push_mode', self.imap_push_mode, bool)
             self.imap_disconnect = self.get_config('Mail', 'disconnect', self.imap_disconnect, bool)
             self.imap_folder = self.get_config('Mail', 'folder', self.imap_folder)
-            self.imap_read_old_mails = self.get_config('Mail', 'read_old_mails', self.imap_read_old_mails)
+            self.imap_read_old_mails = self.get_config('Mail', 'read_old_mails', self.imap_read_old_mails, bool)
             self.imap_search = self.get_config('Mail', 'search', self.imap_search)
             self.imap_mark_as_read = self.get_config('Mail', 'mark_as_read', self.imap_mark_as_read, bool)
             self.imap_max_length = self.get_config('Mail', 'max_length', self.imap_max_length, int)
@@ -452,14 +452,13 @@ class TelegramBot:
                         continue
                     image_seen[cid] = True
 
-                    if cid in images:
+                    image = next((mail_image['image'] for mail_image in images or []
+                                  if mail_image['key'] == cid), None)
+                    if image is not None:
                         # add image reference
                         tg_body = tg_body.replace(img, '${file:%s}' % cid)
                         # extract alt/title attributes of img elements
-                        for image in images:
-                            if image.key == cid:
-                                images.alt = alt
-                                break
+                        image.alt = alt
                     else:
                         # no file found, use alt text
                         tg_body = tg_body.replace(img, alt)
@@ -562,13 +561,13 @@ class TelegramBot:
                                         title = '%i. %s: %s' % (image_no, mail.mail_subject, image.get_title())
                                     else:
                                         title = '%s' % mail.mail_subject
-                                    doc_message: Message = await self.bot.send_photo(
+                                    doc_message: Message = await bot.send_photo(
                                         chat_id=self.config.tg_forward_to_chat_id,
                                         parse_mode=parser,
                                         caption=title,
                                         photo=image.file,
                                     )
-                                    photo_size: list[PhotoSize] = doc_message.photo
+                                    photo_size: tuple[PhotoSize, ...] = doc_message.photo
                                     image.tg_id = photo_size[0].file_id
 
                                 message = message.replace(
@@ -588,10 +587,9 @@ class TelegramBot:
                                         '<a href="%s">🖼 %s</a>' % (src, alt)
                                     )
 
-                                tg_message: Message = await self.bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
-                                                                                  parse_mode=parser,
-                                                                                  text=message,
-                                                                                  disable_web_page_preview=False)
+                                tg_message: Message = await bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
+                                                                             parse_mode=parser,
+                                                                             text=message)
 
                                 logging.info("Mail summary for '%s' (UID: '%s') was sent"
                                              " with message ID '%i' to '%s' (ID: '%i')"
@@ -612,12 +610,12 @@ class TelegramBot:
                                 else:
                                     caption = subject
 
-                                tg_message = await self.bot.send_document(chat_id=self.config.tg_forward_to_chat_id,
-                                                                          parse_mode=parser,
-                                                                          caption=caption,
-                                                                          document=attachment.file,
-                                                                          filename=attachment.name,
-                                                                          disable_content_type_detection=False)
+                                tg_message = await bot.send_document(chat_id=self.config.tg_forward_to_chat_id,
+                                                                     parse_mode=parser,
+                                                                     caption=caption,
+                                                                     document=attachment.file,
+                                                                     filename=attachment.name,
+                                                                     disable_content_type_detection=False)
 
                                 logging.info("Attachment '%s' was sent with ID '%i' to '%s' (ID: '%s')"
                                              % (attachment.name, tg_message.message_id,
@@ -629,11 +627,10 @@ class TelegramBot:
                         logging.critical(msg)
                         try:
                             # try to send error via telegram, and ignore further errors
-                            await self.bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
-                                                        parse_mode=ParseMode.MARKDOWN_V2,
-                                                        text=helpers.escape_markdown(msg, version=2),
-                                                        disable_web_page_preview=False)
-                        finally:
+                            await bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
+                                                   parse_mode=ParseMode.MARKDOWN_V2,
+                                                   text=helpers.escape_markdown(msg, version=2))
+                        except Exception:
                             logging.critical("Failed to send error message {0}".format(tg_mail_error.message))
 
                     except Exception as send_mail_error:
@@ -643,11 +640,10 @@ class TelegramBot:
                         logging.critical(msg)
                         try:
                             # try to send error via telegram, and ignore further errors
-                            await self.bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
-                                                        parse_mode=ParseMode.MARKDOWN_V2,
-                                                        text=helpers.escape_markdown(msg, version=2),
-                                                        disable_web_page_preview=False)
-                        finally:
+                            await bot.send_message(chat_id=self.config.tg_forward_to_chat_id,
+                                                   parse_mode=ParseMode.MARKDOWN_V2,
+                                                   text=helpers.escape_markdown(msg, version=2))
+                        except Exception:
                             logging.critical("Failed to send error message {0}".format("".join(error_msgs)))
 
         except error.TelegramError as tg_error:
@@ -822,7 +818,7 @@ class Mail:
 
     def get_last_uid(self) -> str:
         """
-        get UID of most recent mail
+        get UID of the oldest unseen mail, so unseen mails received while offline are forwarded too
         """
         rv, data = self.mailbox.select(self.config.imap_folder)
         rv, data = self.mailbox.uid('SEARCH', None, 'UNSEEN')
@@ -830,10 +826,9 @@ class Mail:
             logging.info("No messages found!")
             return ''
         try:
-            num = Tool.binary_to_string(data[0].split()[0])
-        except:
-            num = 1 
-        return num
+            return self.config.tool.binary_to_string(data[0].split()[0])
+        except IndexError:
+            return '1'
 
     def parse_mail(self, uid, mail) -> (MailData | None):
         """
@@ -935,6 +930,8 @@ class Mail:
 
             # subject
             subject = self.config.tool.decode_mail_data(msg['Subject'])
+            if self.config.imap_cut_from_subject:
+                subject = subject.replace(self.config.imap_cut_from_subject, '').strip()
 
             # build summary
             mail_from = self.config.tool.decode_mail_data(msg['From'])
@@ -945,6 +942,7 @@ class Mail:
                 summary_line = "\n"
 
             if message_type == MailDataType.HTML:
+                subject = html.escape(subject, quote=False)
                 mail_from = html.escape(mail_from, quote=True)
                 email_text = "<b>From:</b> " + mail_from + "\n<b>Subject:</b> "
             else:
@@ -956,8 +954,6 @@ class Mail:
                                                        version=self.config.tg_markdown_version)
                 email_text = "*From:* " + mail_from + "\n*Subject:* "
             email_text += subject + summary_line + content + " " + attachments_summary
-
-            subject = subject.replace(self.config.imap_cut_from_subject, '')
 
             mail_data = MailData()
             mail_data.uid = uid
@@ -1109,6 +1105,8 @@ async def main() -> None:
     root_logger = logging.getLogger()
     root_logger.setLevel("INFO")
     root_logger.addHandler(sys_handler)
+    # httpx logs every request URL at INFO level, and these URLs contain the bot token
+    logging.getLogger('httpx').setLevel(logging.WARNING)
 
     args_parser = argparse.ArgumentParser(description='Mail to Telegram Forwarder')
     args_parser.add_argument('-c', '--config', type=str, help='Path to config file', required=True)

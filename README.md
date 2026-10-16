@@ -1,3 +1,14 @@
+# This project has moved
+
+> [!WARNING]  
+> This repository is now maintained at
+> [https://codeberg.org/Awalon/MailToTelegramForwarder](https://codeberg.org/Awalon/MailToTelegramForwarder).
+
+> [!CAUTION]  
+> This GitHub mirror may be out of date. Please file issues and
+> contributions on Codeberg.
+
+
 # [![Logo](logo/Mail2TelegramForwarder-Bot-small.png)](logo/CREDIT.md) MailToTelegramForwarder - Service
 [![Project: MailToTelegramForwarder](https://img.shields.io/badge/Project-MailToTelegramForwarder-red.svg?style=flat-square)](https://github.com/awalon/MailToTelegramForwarder/)
 [![GitHub issues](https://img.shields.io/github/issues/awalon/MailToTelegramForwarder?style=flat-square)](https://github.com/awalon/MailToTelegramForwarder/issues) 
@@ -40,14 +51,21 @@ To run "mailToTelegramForwarder.py" you have to make sure Python
 - email
 - telegram-bot
 - imaplib2
+- beautifulsoup4 (HTML parser, used to fix broken HTML structure)
 ```
 
-For Debian 11.x (Bullseye) these packages have to be installed:
+For Debian 13.x (Trixie) these packages have to be installed:
 
 **Hint**: python3-python-telegram-bot is available since Bullseye.
 ```
-sudo apt install python3-python-telegram-bot python3-imaplib2
+sudo apt install python3-python-telegram-bot python3-imaplib2 python3-bs4
 ```
+
+For Arch (CachyOS) these packages have to be installed:
+```
+yay -Su python-telegram-bot python-imaplib2 python-beautifulsoup4
+```
+
 
 #### Create dedicated system user
 
@@ -315,7 +333,7 @@ sudo systemctl status mail-to-telegram-forwarder@mailToTelegramForwarder
   on - *Initial work* - **Luca Weiss** [@z3ntu](https://github.com/z3ntu/IMAPBot)
   [*Abandoned*]
 - **Awalon** - *Merged and enhanced Version* - 
-  [@awalon](https://github.com/awalon/MailToTelegramForwarder)
+  [@Awalon](https://github.com/awalon/MailToTelegramForwarder)
 
 ## License
 
